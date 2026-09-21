@@ -14,8 +14,8 @@ st.caption("주차별 최종 출석 현황만 깔끔하게 확인하세요.")
 # 사이드바 로그인 폼
 with st.sidebar:
     st.header("🔑 로그인 정보")
-    user_id = st.text_input("학번", placeholder="20241234")
-    user_pw = st.text_input("비밀번호", type="password")
+    user_id = st.text_input("Username (학번)", placeholder="20250000")
+    user_pw = st.text_input("Password (비밀번호)", type="password")
     
     st.divider()
     # 예정/미열람만 있는 과목 숨기기 옵션 (기본값: 체크됨)
