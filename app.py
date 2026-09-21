@@ -19,7 +19,7 @@ with st.sidebar:
     
     st.divider()
     # 예정/미열람만 있는 과목 숨기기 옵션 (기본값: 체크됨)
-    hide_all_upcoming = st.checkbox("전체 주차가 '예정/미열람'인 과목 숨기기", value=True)
+    hide_all_upcoming = st.checkbox("온라인 출석 기록이 없는 과목 숨기기", value=True)
     
     submit_btn = st.button("수강 현황 불러오기", type="primary")
 
@@ -137,8 +137,6 @@ if 'all_courses' in st.session_state:
                                             
                                 # 해당 행의 정보 수집 (강의 자료, 학습 시간, 출석 마크 등)
                                 if current_week_num is not None:
-                                    # 보통 LMS 표 구조상: [주차, 강의자료, 출석인정요구시간, 총학습시간, 출석, 주차출석 ...] 형태
-                                    # 텍스트 내용들을 안전하게 모아둡니다.
                                     full_row_text = " ".join(cell_texts)
                                     
                                     # 강의 자료 이름 감지 (동영상이나 링크가 있으면 채워짐)
@@ -156,9 +154,9 @@ if 'all_courses' in st.session_state:
                                     combined_status = " ".join(status_cells + img_attrs)
                                     summary_dict[current_week_num]["texts"].append(combined_status)
                     
-                    # 최종 주차별 상태 결정
+                    # 최종 주차별 상태 결정 및 미진행 주차(업로드 전/기간 전) 필터링
                     final_summary = []
-                    has_active_attendance = False  # 예정/미열람 외 다른 상태가 하나라도 있는지 체크
+                    has_active_attendance = False  # 실제 출석 기록(출석/결석/지각 등)이 하나라도 있는지 체크
                     
                     for week_num in sorted(summary_dict.keys()):
                         data = summary_dict[week_num]
@@ -166,14 +164,16 @@ if 'all_courses' in st.session_state:
                         material_exists = data["material"] == "exists"
                         time_is_hyphen = data["time"] == "-"
                         
-                        # 1. 강의 자료 자체가 아예 없는 경우 (빈칸)
+                        # 1. 강의 자료 자체가 아예 없는 경우 (업로드 전) -> 표에서 제외
                         if not material_exists and not joined_str:
-                            final_st = "⚪ 업로드 전 (강의 없음)"
-                        # 2. 강의 자료는 있으나 학습시간이 '-' 이고 출석 기록이 빈칸인 경우 (수강 기간 전)
+                            continue
+                            
+                        # 2. 강의 자료는 있으나 학습시간이 '-' 이고 출석 기록이 빈칸인 경우 (수강 기간 전) -> 표에서 제외
                         elif time_is_hyphen and (not joined_str or joined_str == "-" or joined_str == "- -"):
-                            final_st = "⏳ 수강 기간 전"
+                            continue
+                            
                         # 3. 지각 체크
-                        elif any(k in joined_str for k in ['▲', '△', '지각', 'L', 'late']):
+                        if any(k in joined_str for k in ['▲', '△', '지각', 'L', 'late']):
                             final_st = "⚠️ 지각"
                             has_active_attendance = True
                         # 4. 결석/미출석 체크
@@ -187,22 +187,20 @@ if 'all_courses' in st.session_state:
                         # 6. 그 외 기본 상태
                         else:
                             final_st = "➖ 예정/미열람"
+                            has_active_attendance = True
                             
                         final_summary.append({"주차": f"{week_num}주차", "최종 출석 현황": final_st})
                     
-                    # 옵션에 따라 모든 주차가 예정/미열람/업로드전인 과목 처리
+                    # 옵션에 따라 모든 주차가 미진행인 과목 처리
                     if hide_all_upcoming and not has_active_attendance:
                         continue
                     
                     with st.expander(f"📖 {title}", expanded=True):
                         if final_summary:
-                            if not has_active_attendance:
-                                st.info("ℹ️ 해당 과목은 아직 진행된 출석 기록이 없습니다.")
-                            else:
-                                df_summary = pd.DataFrame(final_summary)
-                                st.table(df_summary)
+                            df_summary = pd.DataFrame(final_summary)
+                            st.table(df_summary)
                         else:
-                            st.info("등록된 주차별 출석 데이터가 없습니다.")
+                            st.info("ℹ️ 현재 진행 중인 주차의 출석 기록이 없습니다.")
                 else:
                     if not hide_all_upcoming:
                         with st.expander(f"📖 {title}", expanded=False):
