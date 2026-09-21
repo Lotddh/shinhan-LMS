@@ -5,75 +5,76 @@ from urllib.parse import urljoin
 import pandas as pd
 import re
 
-# 페이지 기본 설정
-st.set_page_config(page_title="신한대 LMS 대시보드", page_icon="🎓", layout="centered")
+# 페이지 기본 설정 (처음 접속 시 사이드바가 열려있도록 설정)
+st.set_page_config(page_title="신한대 LMS 대시보드", page_icon="🎓", layout="centered", initial_sidebar_state="expanded")
 
 st.title("🎓 신한대학교 LMS 주차별 출석 요약")
 st.caption("주차별 최종 출석 현황만 깔끔하게 확인하세요.")
 
-# 세션에 로그인 정보가 없을 때만 메인 화면에 로그인 폼 출력
-if 'all_courses' not in st.session_state:
-    st.divider()
-    st.subheader("🔑 로그인 정보 입력")
+# 사이드바 로그인 폼
+with st.sidebar:
+    st.header("🔑 로그인 정보")
+    user_id = st.text_input("Username (학번)", placeholder="20250000")
+    user_pw = st.text_input("Password (비밀번호)", type="password", autocomplete="current-password")
     
-    with st.form("login_form"):
-        user_id = st.text_input("Username (학번)", placeholder="20250000")
-        user_pw = st.text_input("Password (비밀번호)", type="password", autocomplete="current-password")
-        hide_all_upcoming = st.checkbox("온라인 출석 기록이 없는 과목 숨기기", value=True)
-        
-        submit_btn = st.form_submit_button("수강 현황 불러오기", type="primary")
+    st.divider()
+    # 온라인 출석 기록이 없는 과목 숨기기 옵션 (기본값: 체크됨)
+    hide_all_upcoming = st.checkbox("온라인 출석 기록이 없는 과목 숨기기", value=True)
+    
+    submit_btn = st.button("수강 현황 불러오기", type="primary")
 
-    if submit_btn:
-        if not user_id or not user_pw:
-            st.warning("학번과 비밀번호를 모두 입력해주세요!")
-        else:
-            with st.spinner("신한대 사이버강의실 로그인 및 데이터 분석 중..."):
-                try:
-                    session = requests.Session()
-                    login_url = "https://cyber.shinhan.ac.kr/login/index.php"
-                    payload = {'username': user_id, 'password': user_pw}
+if submit_btn:
+    if not user_id or not user_pw:
+        st.warning("학번과 비밀번호를 모두 입력해주세요!")
+    else:
+        with st.spinner("신한대 사이버강의실 로그인 및 데이터 분석 중..."):
+            try:
+                session = requests.Session()
+                login_url = "https://cyber.shinhan.ac.kr/login/index.php"
+                payload = {'username': user_id, 'password': user_pw}
+                
+                # 1. 로그인 시도
+                res = session.post(login_url, data=payload)
+                
+                # 2. 전체 수강 과목 목록 조회
+                course_page_url = "https://cyber.shinhan.ac.kr/local/ubion/user/index.php"
+                res = session.get(course_page_url)
+                soup = BeautifulSoup(res.text, 'html.parser')
+                
+                all_courses = []
+                for a in soup.find_all('a'):
+                    href = a.get('href', '')
+                    text = a.get_text(strip=True)
+                    if 'course/view.php?id=' in href and text:
+                        if (text, href) not in all_courses and len(text) > 1:
+                            all_courses.append((text, href))
+                
+                if not all_courses:
+                    st.error("❌ 과목을 찾지 못했거나 로그인 정보가 올바르지 않습니다.")
+                else:
+                    st.session_state['session'] = session
+                    st.session_state['all_courses'] = all_courses
                     
-                    # 1. 로그인 시도
-                    res = session.post(login_url, data=payload)
+                    # 💡 로그인 성공 시 자바스크립트를 이용해 사이드바를 자동으로 접어버리는 트릭
+                    st.markdown("""
+                        <script>
+                            var buttons = parent.document.querySelectorAll('button[aria-label="Collapse sidebar"]');
+                            if (buttons.length > 0) {
+                                buttons[0].click();
+                            }
+                        </script>
+                    """, unsafe_allow_html=True)
                     
-                    # 2. 전체 수강 과목 목록 조회
-                    course_page_url = "https://cyber.shinhan.ac.kr/local/ubion/user/index.php"
-                    res = session.get(course_page_url)
-                    soup = BeautifulSoup(res.text, 'html.parser')
-                    
-                    all_courses = []
-                    for a in soup.find_all('a'):
-                        href = a.get('href', '')
-                        text = a.get_text(strip=True)
-                        if 'course/view.php?id=' in href and text:
-                            if (text, href) not in all_courses and len(text) > 1:
-                                all_courses.append((text, href))
-                    
-                    if not all_courses:
-                        st.error("❌ 과목을 찾지 못했거나 로그인 정보가 올바르지 않습니다.")
-                    else:
-                        st.session_state['session'] = session
-                        st.session_state['all_courses'] = all_courses
-                        st.session_state['hide_all_upcoming'] = hide_all_upcoming
-                        st.reren() # 페이지 새로고침하여 결과 출력
+                    st.success(f"총 {len(all_courses)}개 과목을 불러왔습니다.")
 
-                except Exception as e:
-                    st.error(f"오류가 발생했습니다: {e}")
+            except Exception as e:
+                st.error(f"오류가 발생했습니다: {e}")
 
-# 데이터 조회가 끝난 상태라면 출석 현황 출력 및 상단에 다시 로그인(새로고침) 버튼 제공
+# 데이터 조회가 끝난 상태라면 모든 과목의 출석 현황 출력
 if 'all_courses' in st.session_state:
     session = st.session_state['session']
     all_courses = st.session_state['all_courses']
-    hide_all_upcoming = st.session_state.get('hide_all_upcoming', True)
     
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.success(f"총 {len(all_courses)}개 과목을 불러왔습니다.")
-    with col2:
-        if st.button("🔄 다시 로그인"):
-            del st.session_state['all_courses']
-            st.rerun()
-            
     st.divider()
     
     for title, course_url in all_courses:
@@ -149,7 +150,7 @@ if 'all_courses' in st.session_state:
                             combined_status = " ".join(status_cells + img_attrs)
                             summary_dict[current_week_num]["texts"].append(combined_status)
             
-            # 두 가지 버전의 데이터 준비
+            # 두 가지 버전의 데이터 준비 (1. 압축된 요약본, 2. 전체 주차 원본)
             compact_summary = []
             full_summary = []
             has_active_attendance = False
