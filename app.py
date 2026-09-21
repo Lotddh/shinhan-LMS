@@ -123,7 +123,8 @@ if 'all_courses' in st.session_state:
                                 if first_cell.isdigit():
                                     current_week_num = int(first_cell)
                                     if current_week_num not in summary_dict:
-                                        summary_dict[current_week_num] = []
+                                        # 주차별 상세 데이터를 저장할 구조 (강의자료 유무, 학습시간, 상태 문자열들)
+                                        summary_dict[current_week_num] = {"material": "", "time": "", "texts": []}
                                 
                                 # 2. 첫 번째 셀에 숫자가 없지만 두 번째 셀에서 주차 감지
                                 elif current_week_num is None:
@@ -132,54 +133,71 @@ if 'all_courses' in st.session_state:
                                     if w_match:
                                         current_week_num = int(w_match.group(1))
                                         if current_week_num not in summary_dict:
-                                            summary_dict[current_week_num] = []
+                                            summary_dict[current_week_num] = {"material": "", "time": "", "texts": []}
                                             
-                                # 해당 행의 출석 마크 수집
+                                # 해당 행의 정보 수집 (강의 자료, 학습 시간, 출석 마크 등)
                                 if current_week_num is not None:
+                                    # 보통 LMS 표 구조상: [주차, 강의자료, 출석인정요구시간, 총학습시간, 출석, 주차출석 ...] 형태
+                                    # 텍스트 내용들을 안전하게 모아둡니다.
+                                    full_row_text = " ".join(cell_texts)
+                                    
+                                    # 강의 자료 이름 감지 (동영상이나 링크가 있으면 채워짐)
+                                    has_material_tag = len(row.find_all('a')) > 0 or "강의" in full_row_text or "동영상" in full_row_text
+                                    if has_material_tag:
+                                        summary_dict[current_week_num]["material"] = "exists"
+                                        
+                                    # 학습 시간란에 '-'가 포함되어 있는지 체크
+                                    if "-" in full_row_text and "총 학습시간" not in full_row_text:
+                                        summary_dict[current_week_num]["time"] = "-"
+                                        
                                     status_cells = cell_texts[-2:] if len(cell_texts) >= 2 else cell_texts
                                     img_attrs = [img.get('alt', '') + img.get('title', '') for img in row.find_all('img')]
                                     
                                     combined_status = " ".join(status_cells + img_attrs)
-                                    summary_dict[current_week_num].append(combined_status)
+                                    summary_dict[current_week_num]["texts"].append(combined_status)
                     
                     # 최종 주차별 상태 결정
                     final_summary = []
-                    has_active_attendance = False  # 예정/미열람 외 다른 상태(출석/지각/미출석)가 하나라도 있는지 체크
+                    has_active_attendance = False  # 예정/미열람 외 다른 상태가 하나라도 있는지 체크
                     
                     for week_num in sorted(summary_dict.keys()):
-                        raw_list = summary_dict[week_num]
-                        joined_str = " ".join(raw_list).strip()
+                        data = summary_dict[week_num]
+                        joined_str = " ".join(data["texts"]).strip()
+                        material_exists = data["material"] == "exists"
+                        time_is_hyphen = data["time"] == "-"
                         
-                        # 데이터가 비어있거나 - 기호만 존재하는 경우
-                        if not joined_str or joined_str == "-" or joined_str == "- -":
-                            final_st = "➖ 예정/미열람"
-                        # 1. 지각 체크
+                        # 1. 강의 자료 자체가 아예 없는 경우 (빈칸)
+                        if not material_exists and not joined_str:
+                            final_st = "⚪ 업로드 전 (강의 없음)"
+                        # 2. 강의 자료는 있으나 학습시간이 '-' 이고 출석 기록이 빈칸인 경우 (수강 기간 전)
+                        elif time_is_hyphen and (not joined_str or joined_str == "-" or joined_str == "- -"):
+                            final_st = "⏳ 수강 기간 전"
+                        # 3. 지각 체크
                         elif any(k in joined_str for k in ['▲', '△', '지각', 'L', 'late']):
                             final_st = "⚠️ 지각"
                             has_active_attendance = True
-                        # 2. 결석/미출석 체크
+                        # 4. 결석/미출석 체크
                         elif 'X' in joined_str or 'x' in joined_str or '결석' in joined_str or '미출석' in joined_str:
                             final_st = "❌ 미출석"
                             has_active_attendance = True
-                        # 3. 출석 체크
+                        # 5. 출석 체크
                         elif 'O' in joined_str or 'o' in joined_str or '출석' in joined_str:
                             final_st = "✅ 출석"
                             has_active_attendance = True
-                        # 4. 그 외 미수강/미열람
+                        # 6. 그 외 기본 상태
                         else:
                             final_st = "➖ 예정/미열람"
                             
                         final_summary.append({"주차": f"{week_num}주차", "최종 출석 현황": final_st})
                     
-                    # 옵션에 따라 모든 주차가 예정/미열람인 과목 처리
+                    # 옵션에 따라 모든 주차가 예정/미열람/업로드전인 과목 처리
                     if hide_all_upcoming and not has_active_attendance:
-                        # 숨기기 옵션이 활성화되어 있고 출석 기록이 하나도 없는 과목은 건너뜀
                         continue
                     
                     with st.expander(f"📖 {title}", expanded=True):
                         if final_summary:
                             if not has_active_attendance:
-                                st.info("ℹ️ 해당 과목은 아직 진행된 출석 기록이 없습니다 (전체 주차 예정/미열람).")
+                                st.info("ℹ️ 해당 과목은 아직 진행된 출석 기록이 없습니다.")
                             else:
                                 df_summary = pd.DataFrame(final_summary)
                                 st.table(df_summary)
