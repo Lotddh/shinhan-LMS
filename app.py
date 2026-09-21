@@ -18,7 +18,7 @@ with st.sidebar:
     user_pw = st.text_input("Password (비밀번호)", type="password", autocomplete="current-password")
     
     st.divider()
-    # 예정/미열람만 있는 과목 숨기기 옵션 (기본값: 체크됨)
+    # 온라인 출석 기록이 없는 과목 숨기기 옵션 (기본값: 체크됨)
     hide_all_upcoming = st.checkbox("온라인 출석 기록이 없는 과목 숨기기", value=True)
     
     submit_btn = st.button("수강 현황 불러오기", type="primary")
@@ -115,7 +115,7 @@ if 'all_courses' in st.session_state:
                                 cell_texts = [c.get_text(strip=True) for c in cells]
                                 first_cell = cell_texts[0]
                                 
-                                # 헤더 행 스킵 (예: '주차', '강의자료', '출석' 등)
+                                # 헤더 행 스킵
                                 if "주차" in first_cell and not first_cell.isdigit():
                                     continue
                                     
@@ -123,7 +123,6 @@ if 'all_courses' in st.session_state:
                                 if first_cell.isdigit():
                                     current_week_num = int(first_cell)
                                     if current_week_num not in summary_dict:
-                                        # 주차별 상세 데이터를 저장할 구조 (강의자료 유무, 학습시간, 상태 문자열들)
                                         summary_dict[current_week_num] = {"material": "", "time": "", "texts": []}
                                 
                                 # 2. 첫 번째 셀에 숫자가 없지만 두 번째 셀에서 주차 감지
@@ -135,16 +134,14 @@ if 'all_courses' in st.session_state:
                                         if current_week_num not in summary_dict:
                                             summary_dict[current_week_num] = {"material": "", "time": "", "texts": []}
                                             
-                                # 해당 행의 정보 수집 (강의 자료, 학습 시간, 출석 마크 등)
+                                # 해당 행의 정보 수집
                                 if current_week_num is not None:
                                     full_row_text = " ".join(cell_texts)
                                     
-                                    # 강의 자료 이름 감지 (동영상이나 링크가 있으면 채워짐)
                                     has_material_tag = len(row.find_all('a')) > 0 or "강의" in full_row_text or "동영상" in full_row_text
                                     if has_material_tag:
                                         summary_dict[current_week_num]["material"] = "exists"
                                         
-                                    # 학습 시간란에 '-'가 포함되어 있는지 체크
                                     if "-" in full_row_text and "총 학습시간" not in full_row_text:
                                         summary_dict[current_week_num]["time"] = "-"
                                         
@@ -154,9 +151,10 @@ if 'all_courses' in st.session_state:
                                     combined_status = " ".join(status_cells + img_attrs)
                                     summary_dict[current_week_num]["texts"].append(combined_status)
                     
-                    # 최종 주차별 상태 결정 및 미진행 주차(업로드 전/기간 전) 필터링
-                    final_summary = []
-                    has_active_attendance = False  # 실제 출석 기록(출석/결석/지각 등)이 하나라도 있는지 체크
+                    # 두 가지 버전의 데이터 준비 (1. 압축된 요약본, 2. 전체 주차 원본)
+                    compact_summary = []
+                    full_summary = []
+                    has_active_attendance = False
                     
                     for week_num in sorted(summary_dict.keys()):
                         data = summary_dict[week_num]
@@ -164,43 +162,56 @@ if 'all_courses' in st.session_state:
                         material_exists = data["material"] == "exists"
                         time_is_hyphen = data["time"] == "-"
                         
-                        # 1. 강의 자료 자체가 아예 없는 경우 (업로드 전) -> 표에서 제외
+                        # 상태 판별 로직
                         if not material_exists and not joined_str:
-                            continue
-                            
-                        # 2. 강의 자료는 있으나 학습시간이 '-' 이고 출석 기록이 빈칸인 경우 (수강 기간 전) -> 표에서 제외
+                            final_st = "⚪ 업로드 전 (강의 없음)"
+                            is_active = False
                         elif time_is_hyphen and (not joined_str or joined_str == "-" or joined_str == "- -"):
-                            continue
-                            
-                        # 3. 지각 체크
-                        if any(k in joined_str for k in ['▲', '△', '지각', 'L', 'late']):
+                            final_st = "⏳ 수강 기간 전"
+                            is_active = False
+                        elif any(k in joined_str for k in ['▲', '△', '지각', 'L', 'late']):
                             final_st = "⚠️ 지각"
                             has_active_attendance = True
-                        # 4. 결석/미출석 체크
+                            is_active = True
                         elif 'X' in joined_str or 'x' in joined_str or '결석' in joined_str or '미출석' in joined_str:
                             final_st = "❌ 미출석"
                             has_active_attendance = True
-                        # 5. 출석 체크
+                            is_active = True
                         elif 'O' in joined_str or 'o' in joined_str or '출석' in joined_str:
                             final_st = "✅ 출석"
                             has_active_attendance = True
-                        # 6. 그 외 기본 상태
+                            is_active = True
                         else:
                             final_st = "➖ 예정/미열람"
                             has_active_attendance = True
+                            is_active = True
                             
-                        final_summary.append({"주차": f"{week_num}주차", "최종 출석 현황": final_st})
+                        row_item = {"주차": f"{week_num}주차", "최종 출석 현황": final_st}
+                        
+                        # 전체 목록에는 모든 주차 추가
+                        full_summary.append(row_item)
+                        # 압축 목록에는 진행된 주차(또는 활성 주차)만 추가
+                        if is_active:
+                            compact_summary.append(row_item)
                     
                     # 옵션에 따라 모든 주차가 미진행인 과목 처리
                     if hide_all_upcoming and not has_active_attendance:
                         continue
                     
                     with st.expander(f"📖 {title}", expanded=True):
-                        if final_summary:
-                            df_summary = pd.DataFrame(final_summary)
-                            st.table(df_summary)
+                        # 기본은 압축된 표 표시
+                        if compact_summary:
+                            df_compact = pd.DataFrame(compact_summary)
+                            st.table(df_compact)
                         else:
                             st.info("ℹ️ 현재 진행 중인 주차의 출석 기록이 없습니다.")
+                            
+                        # 사용자가 원할 때 전체 주차를 펼쳐볼 수 있는 토글 체크박스
+                        show_all_weeks = st.checkbox(f"전체 주차 보기 (1~15주차)", key=f"toggle_{title}")
+                        if show_all_weeks:
+                            if full_summary:
+                                df_full = pd.DataFrame(full_summary)
+                                st.table(df_full)
                 else:
                     if not hide_all_upcoming:
                         with st.expander(f"📖 {title}", expanded=False):
