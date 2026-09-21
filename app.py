@@ -5,8 +5,8 @@ from urllib.parse import urljoin
 import pandas as pd
 import re
 
-# 페이지 기본 설정
-st.set_page_config(page_title="신한대 LMS 대시보드", page_icon="🎓", layout="centered")
+# 페이지 기본 설정 (처음 접속 시 사이드바가 열려있도록 설정)
+st.set_page_config(page_title="신한대 LMS 대시보드", page_icon="🎓", layout="centered", initial_sidebar_state="expanded")
 
 st.title("🎓 신한대학교 LMS 주차별 출석 요약")
 st.caption("주차별 최종 출석 현황만 깔끔하게 확인하세요.")
@@ -54,12 +54,23 @@ if submit_btn:
                 else:
                     st.session_state['session'] = session
                     st.session_state['all_courses'] = all_courses
+                    
+                    # 💡 로그인 성공 시 자바스크립트를 이용해 사이드바를 자동으로 접어버리는 트릭
+                    st.markdown("""
+                        <script>
+                            var buttons = parent.document.querySelectorAll('button[aria-label="Collapse sidebar"]');
+                            if (buttons.length > 0) {
+                                buttons[0].click();
+                            }
+                        </script>
+                    """, unsafe_allow_html=True)
+                    
                     st.success(f"총 {len(all_courses)}개 과목을 불러왔습니다.")
 
             except Exception as e:
                 st.error(f"오류가 발생했습니다: {e}")
 
-# 데이터 조회가 끝난 상태라면 멀티셀렉트 없이 모든 과목을 곧바로 순회하며 출력
+# 데이터 조회가 끝난 상태라면 모든 과목의 출석 현황 출력
 if 'all_courses' in st.session_state:
     session = st.session_state['session']
     all_courses = st.session_state['all_courses']
